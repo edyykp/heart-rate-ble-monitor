@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
-
 
 void main() => runApp(HeartRateApp());
 
@@ -31,15 +31,32 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
   List<FlSpot> dataPoints = [];
   int time = 0; // fiecare punct pe axa X e o unitate de timp (ex. secundă)
 
-
   @override
   void initState() {
     super.initState();
-    initializeNotifications();
-    startScan();
+    init();
   }
 
-  void initializeNotifications() async {
+  Future<void> init() async {
+    await requestPermissions();
+    await initializeNotifications();
+    waitForBluetooth();
+  }
+
+  void waitForBluetooth() {
+    FlutterBluePlus.adapterState.listen((state) {
+      print("Bluetooth state: $state");
+
+      if (state == BluetoothAdapterState.on) {
+        startScan();
+      } else if (state == BluetoothAdapterState.off) {
+        // show message to user
+        print("Bluetooth is OFF");
+      }
+    });
+  }
+
+  Future<void> initializeNotifications() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
@@ -70,19 +87,27 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
     );
   }
 
-
-
   void startScan() async {
-    FlutterBluePlus.startScan(timeout: Duration(seconds: 5));
+    FlutterBluePlus.startScan(timeout: Duration(seconds: 10));
+
     FlutterBluePlus.scanResults.listen((results) {
       for (var r in results) {
-        if (r.advertisementData.serviceUuids.contains("180D")) {
+        if (r.device.platformName.toLowerCase().contains('heart')) {
           FlutterBluePlus.stopScan();
           connectToDevice(r.device);
           break;
         }
       }
     });
+  }
+
+  Future<void> requestPermissions() async {
+    await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+      Permission.notification,
+    ].request();
   }
 
   void connectToDevice(BluetoothDevice d) async {
@@ -100,12 +125,15 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
                 final rate = value[1];
                 setState(() {
                   heartRate = rate;
-                  dataPoints.add(FlSpot(time.toDouble(), rate.toDouble()));
+                  dataPoints = [
+                    ...dataPoints,
+                    FlSpot(time.toDouble(), rate.toDouble()),
+                  ];
+
                   time++;
 
-                  // opțional: limitează numărul de puncte afișate
                   if (dataPoints.length > 50) {
-                    dataPoints.removeAt(0);
+                    dataPoints = dataPoints.sublist(1);
                   }
                 });
 
@@ -161,8 +189,7 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
             ),
           ),
         ],
-      )
-
+      ),
     );
   }
 }
